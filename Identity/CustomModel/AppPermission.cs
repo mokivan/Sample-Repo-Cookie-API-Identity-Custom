@@ -16,18 +16,12 @@
                 Name = "CreateForecast",
                 RoleId = 1
             },
-            new()
-            {
-                Id = 3,
-                Name = "non-existant",
-                RoleId = 3
-            },
         };
 
         public int Id { get; set; }
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
 
         public int RoleId { get; set; }
-        public AppRole Role { get; set; }
+        public AppRole Role { get; set; } = null!;
     }
 }

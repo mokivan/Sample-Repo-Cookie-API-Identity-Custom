@@ -1,74 +1,69 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using System.Data;
 using TestIdentity.Identity.CustomModel;
 
 namespace TestIdentity.Identity.Stores
 {
-    public class UserStore : IUserStore<AppUser>, IUserRoleStore<AppUser>, IUserPasswordStore<AppUser>
+    public class UserStore : IUserStore<AppUser>, IUserRoleStore<AppUser>, IUserPasswordStore<AppUser>, IUserEmailStore<AppUser>
     {
-        private readonly IRoleStore<AppRole> _roleStore;
         private readonly DataAccess.AppContext _appContext;
 
-        public UserStore(IRoleStore<AppRole> roleStore, DataAccess.AppContext appContext)
+        public UserStore(DataAccess.AppContext appContext)
         {
-            _roleStore = roleStore;
             _appContext = appContext;
         }
 
         public async Task AddToRoleAsync(AppUser user, string roleName, CancellationToken cancellationToken)
         {
-            var foundUser = await _appContext.Users.FindAsync(user.Id, cancellationToken);
-            var role = await _roleStore.FindByNameAsync(roleName, cancellationToken);
-            if (role is null)
+            var existingUser = await LoadUserWithRolesAsync(user.Id, cancellationToken);
+            var role = await _appContext.Roles.SingleOrDefaultAsync(existingRole => existingRole.NormalizedName == Normalize(roleName), cancellationToken);
+            if (existingUser is null || role is null)
             {
-                throw new ArgumentNullException(nameof(role));
+                throw new InvalidOperationException("Unable to associate the user with the requested role.");
             }
 
-            user.Roles.Add(role);
-            await _appContext.SaveChangesAsync();
+            if (existingUser.Roles.All(existingRole => existingRole.Id != role.Id))
+            {
+                existingUser.Roles.Add(role);
+                await _appContext.SaveChangesAsync(cancellationToken);
+            }
         }
 
         public async Task<IdentityResult> CreateAsync(AppUser user, CancellationToken cancellationToken)
         {
-            IdentityResult result;
             try
             {
-                user.Roles = _appContext.Roles.Where(r => user.Roles.Contains(r)).ToList();
-
-                _appContext.Users.Update(user);
+                user.Roles = await ResolveRolesAsync(user.Roles.Select(role => role.Id), cancellationToken);
+                _appContext.Users.Add(user);
                 await _appContext.SaveChangesAsync(cancellationToken);
-                result = IdentityResult.Success;
             }
             catch (Exception ex)
             {
-                result = IdentityResult.Failed(new IdentityError()
-                {
-                    Code = ex.Message,
-                    Description = ex.StackTrace ?? "Empty description"
-                });
+                return IdentityResult.Failed(CreateError(ex, "Unable to create user."));
             }
-            return result;
+
+            return IdentityResult.Success;
         }
 
         public async Task<IdentityResult> DeleteAsync(AppUser user, CancellationToken cancellationToken)
         {
-            IdentityResult result;
+            var existingUser = await LoadUserWithRolesAsync(user.Id, cancellationToken);
+            if (existingUser is null)
+            {
+                return IdentityResult.Success;
+            }
+
             try
             {
-                _appContext.Remove(user);
+                _appContext.Users.Remove(existingUser);
                 await _appContext.SaveChangesAsync(cancellationToken);
-                result = IdentityResult.Success;
             }
             catch (Exception ex)
             {
-                result = IdentityResult.Failed(new IdentityError()
-                {
-                    Code = ex.Message,
-                    Description = ex.StackTrace ?? "Empty description"
-                });
+                return IdentityResult.Failed(CreateError(ex, "Unable to delete user."));
             }
-            return result;
+
+            return IdentityResult.Success;
         }
 
         public void Dispose()
@@ -77,135 +72,228 @@ namespace TestIdentity.Identity.Stores
 
         public async Task<AppUser?> FindByIdAsync(string userId, CancellationToken cancellationToken)
         {
-            return await _appContext.Users.FindAsync(new object?[] { userId }, cancellationToken: cancellationToken);
+            return int.TryParse(userId, out var parsedUserId)
+                ? await LoadUserWithRolesAsync(parsedUserId, cancellationToken)
+                : null;
         }
 
         public async Task<AppUser?> FindByNameAsync(string normalizedUserName, CancellationToken cancellationToken)
         {
-            var result = await _appContext.Users
-                .Where(x => x.Username.ToLower() == normalizedUserName.ToLower() || x.Email.ToLower() == normalizedUserName.ToLower())
-                .Include(x => x.Roles).ThenInclude(r => r.Permissions)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            return result;
+            var normalizedLookup = Normalize(normalizedUserName);
+            return await _appContext.Users
+                .Include(user => user.Roles)
+                .ThenInclude(role => role.Permissions)
+                .SingleOrDefaultAsync(
+                    user => user.NormalizedUsername == normalizedLookup || user.NormalizedEmail == normalizedLookup,
+                    cancellationToken);
         }
 
         public Task<string?> GetNormalizedUserNameAsync(AppUser user, CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                return Task.FromResult(user?.Username.ToLowerInvariant());
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(user.NormalizedUsername);
         }
 
         public Task<string?> GetPasswordHashAsync(AppUser user, CancellationToken cancellationToken)
         {
-            return Task.FromResult(user.Password);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(user.PasswordHash);
         }
 
         public Task<IList<string>> GetRolesAsync(AppUser user, CancellationToken cancellationToken)
         {
-            IList<string> result = user.Roles.Select(x => x.Name).ToList();
+            cancellationToken.ThrowIfCancellationRequested();
+            IList<string> result = user.Roles.Select(role => role.Name).ToList();
             return Task.FromResult(result);
         }
 
         public Task<string> GetUserIdAsync(AppUser user, CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                return Task.FromResult(user?.Id.ToString() ?? "");
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(user.Id.ToString());
         }
 
         public Task<string?> GetUserNameAsync(AppUser user, CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                return Task.FromResult(user?.Username);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(user.Username);
         }
 
-        public Task<IList<AppUser>> GetUsersInRoleAsync(string roleName, CancellationToken cancellationToken)
+        public async Task<IList<AppUser>> GetUsersInRoleAsync(string roleName, CancellationToken cancellationToken)
         {
-            IList<AppUser> result = _appContext.Users.Where(x => x.Roles.Any(r => r.Name == roleName)).ToList();
-            return Task.FromResult(result);
+            var normalizedRoleName = Normalize(roleName);
+            return await _appContext.Users
+                .Include(user => user.Roles)
+                .ThenInclude(role => role.Permissions)
+                .Where(user => user.Roles.Any(role => role.NormalizedName == normalizedRoleName))
+                .ToListAsync(cancellationToken);
         }
 
         public Task<bool> HasPasswordAsync(AppUser user, CancellationToken cancellationToken)
         {
-            return Task.FromResult(true);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(!string.IsNullOrWhiteSpace(user.PasswordHash));
         }
 
         public Task<bool> IsInRoleAsync(AppUser user, string roleName, CancellationToken cancellationToken)
         {
-            var result = user.Roles.Any(x => x.Name == roleName);
-            return Task.FromResult(result);
+            cancellationToken.ThrowIfCancellationRequested();
+            var normalizedRoleName = Normalize(roleName);
+            return Task.FromResult(user.Roles.Any(role => role.NormalizedName == normalizedRoleName));
         }
 
-        public Task RemoveFromRoleAsync(AppUser user, string roleName, CancellationToken cancellationToken)
+        public async Task RemoveFromRoleAsync(AppUser user, string roleName, CancellationToken cancellationToken)
         {
-            var role = _appContext.Roles.FirstOrDefault(x => x.Name == roleName);
-            user.Roles.Remove(role!);
-            return _appContext.SaveChangesAsync(cancellationToken);
+            var existingUser = await LoadUserWithRolesAsync(user.Id, cancellationToken);
+            if (existingUser is null)
+            {
+                return;
+            }
+
+            var normalizedRoleName = Normalize(roleName);
+            var role = existingUser.Roles.SingleOrDefault(existingRole => existingRole.NormalizedName == normalizedRoleName);
+            if (role is null)
+            {
+                return;
+            }
+
+            existingUser.Roles.Remove(role);
+            await _appContext.SaveChangesAsync(cancellationToken);
         }
 
         public Task SetNormalizedUserNameAsync(AppUser user, string? normalizedName, CancellationToken cancellationToken)
         {
-            user.Username = normalizedName.ToLower();
+            cancellationToken.ThrowIfCancellationRequested();
+            user.NormalizedUsername = Normalize(normalizedName);
             return Task.CompletedTask;
         }
 
         public Task SetPasswordHashAsync(AppUser user, string? passwordHash, CancellationToken cancellationToken)
         {
-            user.Password = passwordHash;
+            cancellationToken.ThrowIfCancellationRequested();
+            user.PasswordHash = passwordHash ?? string.Empty;
             return Task.CompletedTask;
         }
 
         public Task SetUserNameAsync(AppUser user, string? userName, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(userName, nameof(userName));
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                user.Username = userName;
-                return Task.CompletedTask;
-            }
+            ArgumentNullException.ThrowIfNull(userName);
+            cancellationToken.ThrowIfCancellationRequested();
+            user.Username = userName;
+            return Task.CompletedTask;
         }
 
         public async Task<IdentityResult> UpdateAsync(AppUser user, CancellationToken cancellationToken)
         {
-            IdentityResult result;
+            var existingUser = await LoadUserWithRolesAsync(user.Id, cancellationToken);
+            if (existingUser is null)
+            {
+                return IdentityResult.Failed(new IdentityError
+                {
+                    Code = nameof(AppUser),
+                    Description = "User was not found."
+                });
+            }
+
             try
             {
-                var entry = _appContext.Entry(user);
-                entry.CurrentValues.SetValues(user);
+                existingUser.Name = user.Name;
+                existingUser.Email = user.Email;
+                existingUser.NormalizedEmail = user.NormalizedEmail;
+                existingUser.EmailConfirmed = user.EmailConfirmed;
+                existingUser.Username = user.Username;
+                existingUser.NormalizedUsername = user.NormalizedUsername;
+                existingUser.PasswordHash = user.PasswordHash;
+                existingUser.Roles = await ResolveRolesAsync(user.Roles.Select(role => role.Id), cancellationToken);
                 await _appContext.SaveChangesAsync(cancellationToken);
-                result = IdentityResult.Success;
             }
             catch (Exception ex)
             {
-                result = IdentityResult.Failed(new IdentityError()
-                {
-                    Code = ex.Message,
-                    Description = ex.StackTrace ?? "Empty description"
-                });
+                return IdentityResult.Failed(CreateError(ex, "Unable to update user."));
             }
-            return result;
+
+            return IdentityResult.Success;
+        }
+
+        public Task SetEmailAsync(AppUser user, string? email, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            user.Email = email ?? string.Empty;
+            return Task.CompletedTask;
+        }
+
+        public Task<string?> GetEmailAsync(AppUser user, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(user.Email);
+        }
+
+        public Task<bool> GetEmailConfirmedAsync(AppUser user, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(user.EmailConfirmed);
+        }
+
+        public Task SetEmailConfirmedAsync(AppUser user, bool confirmed, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            user.EmailConfirmed = confirmed;
+            return Task.CompletedTask;
+        }
+
+        public Task<AppUser?> FindByEmailAsync(string normalizedEmail, CancellationToken cancellationToken)
+        {
+            var normalizedLookup = Normalize(normalizedEmail);
+            return _appContext.Users
+                .Include(user => user.Roles)
+                .ThenInclude(role => role.Permissions)
+                .SingleOrDefaultAsync(user => user.NormalizedEmail == normalizedLookup, cancellationToken);
+        }
+
+        public Task<string?> GetNormalizedEmailAsync(AppUser user, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(user.NormalizedEmail);
+        }
+
+        public Task SetNormalizedEmailAsync(AppUser user, string? normalizedEmail, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            user.NormalizedEmail = Normalize(normalizedEmail);
+            return Task.CompletedTask;
+        }
+
+        private async Task<AppUser?> LoadUserWithRolesAsync(int userId, CancellationToken cancellationToken)
+        {
+            return await _appContext.Users
+                .Include(user => user.Roles)
+                .ThenInclude(role => role.Permissions)
+                .SingleOrDefaultAsync(user => user.Id == userId, cancellationToken);
+        }
+
+        private async Task<List<AppRole>> ResolveRolesAsync(IEnumerable<int> roleIds, CancellationToken cancellationToken)
+        {
+            var distinctRoleIds = roleIds.Where(roleId => roleId > 0).Distinct().ToArray();
+            if (distinctRoleIds.Length == 0)
+            {
+                return new List<AppRole>();
+            }
+
+            return await _appContext.Roles.Where(role => distinctRoleIds.Contains(role.Id)).ToListAsync(cancellationToken);
+        }
+
+        private static IdentityError CreateError(Exception exception, string description)
+        {
+            return new IdentityError
+            {
+                Code = exception.GetType().Name,
+                Description = description
+            };
+        }
+
+        private static string Normalize(string? value)
+        {
+            return value?.Trim().ToUpperInvariant() ?? string.Empty;
         }
     }
 }

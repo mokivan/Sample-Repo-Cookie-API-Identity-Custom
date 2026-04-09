@@ -1,63 +1,155 @@
-# Sample Project: Cookie based authentication with custom Identity implementation
-This is an example repo for a semi-custom implementation of Identity based Authentication, supporting both Role and Permission based authorization.
+[![.NET 10 LTS](https://img.shields.io/badge/.NET-10%20LTS-512BD4)](https://dotnet.microsoft.com/)
+[![Integration Tests](https://img.shields.io/badge/tests-integration%20%2B%20CI-0A7E3B)](.github/workflows/ci.yml)
 
-Although the Permissions and Roles are a little messy and not representing of a real-life problem, it serves my purpose: To exemplify the implementation of Identity and not neccesarily to solve a _real_ problem.
+# Cookie authentication with custom ASP.NET Identity stores
 
-It's also using serverside session, to avoid bloating the cookie size. It keeps the auth cookie size relatively small, while being able to store _"infinite"_ permissions and roles for the logged user.
+This repository is a public sample that demonstrates:
 
-The session storage is backed by redis as a distributed storage.
+- Cookie-based authentication for an API.
+- Custom `UserStore` and `RoleStore` implementations.
+- Role-based and permission-based authorization.
+- Server-side session storage backed by Redis to keep the auth cookie small.
+- Two API instances behind nginx sharing both session state and data protection keys.
 
-The data storage is using PostgreSQL, but with few modifications it can run with other data providers as well.
+The project is intentionally educational, but the implementation is polished enough to be a serious public sample. It is not meant to be copied blindly into production as-is.
 
-# Solution folders
-- **Controllers**
-- **DataAccess**: Contains a single DBContext with an extension method to abstract the registering of the service.
-- **Identity**:
-	- CustomModel: Contains the custom implementation of User, Role and Permission used for both Authentication and Authorization.
-	- DTO: Contains the classes used for the Auth API requests
-		- LoginModel: Used for sign in
-		- RegisterModel: Used for user registration. The Roles property should not exists, but being a test API it was the fastest way to add data to any user.
-	- Filters: Contains the custom implementation of Permission based auth. It uses an attribute to register the roles which can access the resource. It can be used at the controller and endpoint level.
-	- Managers: Contains a single file, a custom implementation of UserManager. It's not really neccesary, but I kept it because it helped me understand the workflow of the Identity Library.
-	- Stores: This are the classes that retrieve and store data related to the Auth workflow with Identity.
-- **Postman**: It contains a postman solution with all the requests neccesary to test the API.
+## What is deliberately custom here
 
-# How to run (as project, from Visual Studio)
-In the TestIdentity project, create a `Properties` folder, and inside a `launchSettings.json` file.
+The following pieces are custom on purpose because they help explain how ASP.NET Identity works internally:
 
-The following is an example of the expected content:
+- `UserStore` and `RoleStore`
+- Permission-based authorization using a custom authorization requirement and policy provider
+- Distributed `ITicketStore` implementation for server-side sessions
+- A minimal domain model (`AppUser`, `AppRole`, `AppPermission`) instead of inheriting from `IdentityUser`
+
+## What is good practice here
+
+- Migration-based schema management with EF Core
+- Unique indexes for normalized usernames, emails, and role names
+- Explicit cookie settings and predictable API auth responses (`401` / `403`)
+- Session ownership checks before targeted logout
+- Integration tests against PostgreSQL and Redis with Testcontainers
+- CI that restores, builds, tests, and smoke-builds the Docker image
+
+## What not to copy directly into production
+
+- There is no account recovery flow, email confirmation flow, MFA, lockout tuning, audit trail, or admin UI.
+- Roles and permissions are seeded for demonstration, not managed dynamically.
+- The sample optimizes for clarity over abstraction reuse.
+
+## Solution layout
+
+- `Controllers`
+  Contains the auth endpoints plus sample role/permission-protected endpoints.
+- `DataAccess`
+  EF Core `DbContext`, migration metadata, and design-time context factory.
+- `Identity/CustomModel`
+  The custom user, role, permission, and claim type definitions.
+- `Identity/DTO`
+  Request and response models for the auth API.
+- `Identity/Filters`
+  Custom permission authorization requirement, handler, policy provider, and attribute.
+- `Identity/Stores`
+  The custom stores that back Identity and the Redis ticket/session store.
+- `Postman`
+  A collection that mirrors the main demo flow.
+- `TestIdentity.IntegrationTests`
+  End-to-end tests using `WebApplicationFactory` plus PostgreSQL and Redis containers.
+
+## Run locally
+
+### Prerequisites
+
+- .NET 10 SDK
+- PostgreSQL
+- Redis
+- Docker Desktop if you want to run the integration tests or the full compose stack
+
+### Local API run
+
+The repository already includes [launchSettings.json](Properties/launchSettings.json), which runs the app in the `Local` environment on `http://localhost:5098`.
+
+1. Start PostgreSQL and Redis locally.
+2. Make sure the values in [appsettings.Local.json](appsettings.Local.json) match your local services.
+3. Run:
+
+```bash
+dotnet restore
+dotnet build
+dotnet run --launch-profile http
 ```
-{
-  "$schema": "https://json.schemastore.org/launchsettings.json",
-  "profiles": {
-    "http": {
-      "commandName": "Project",
-      "dotnetRunMessages": true,
-      "applicationUrl": "http://localhost:5098",
-      "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Local",
-        "TestIdentity_ConnectionStrings__Default": "<Your-connection-string-here>"
-      }
-    }
-  }
-}
 
+At startup, non-production environments automatically apply EF Core migrations.
+
+## Run with Docker Compose
+
+1. Copy `.env.example` to `.env`.
+2. Adjust the PostgreSQL values if needed.
+3. Build and start the stack:
+
+```bash
+docker compose -f docker-compose-build.yaml build
+docker compose up
 ```
 
-# How to run (As docker-compose project, replicated)
-Located in the project root, build the API image with `docker-compose -f ./docker-compose-build.yaml build`
+The compose file starts:
 
-Create a `.env` file, following the `.env.example` in the project root.
+- PostgreSQL
+- Redis
+- two API containers
+- nginx as reverse proxy
 
-You should be able to run the project with `docker-compose -f ./docker-compose.yaml up`. It contains a `redis` service, two containers for the API and a `nginx` container to serve as a reverse proxy.
+Add `api.identity.local` to your hosts file:
 
-To call the API, you need to modify your `hosts` file, adding the `api.identity.local` alias to the `127.0.0.1` address
-
-Example, from my own hosts file
+```text
+127.0.0.1 api.identity.local
 ```
-127.0.0.1 localhost local cache api.identity.local
+
+Then call the API via `http://api.identity.local`.
+
+## Recommended demo flow
+
+1. Register a user with roles `1` and `2`.
+2. Log in with that user.
+3. Call `/me` to inspect authentication state, roles, permissions, and current SID.
+4. Call `/sessions` to see active distributed sessions.
+5. Call `/api/test-role` to verify role-based authorization.
+6. Call `/api/weatherforecast/single` and `POST /api/weatherforecast` to verify permission-based authorization.
+7. Create a second login for the same user, then revoke one session with `POST /logout?sid=...`.
+8. Finish with `POST /logout-all`.
+
+## Tests and CI
+
+Build:
+
+```bash
+dotnet build TestIdentityCookie.sln
 ```
 
-Having done that, you should be able to call the API. Check the Postman collection first, and ensure you're using the proper URL. It has two configured as variables.
+Integration tests:
 
-One is for the API running as a dotnet standalone project (http://localhost:5098) and the other is for when you're running behind nginx (http://api.identity.local)
+```bash
+dotnet test TestIdentity.IntegrationTests/TestIdentity.IntegrationTests.csproj
+```
+
+The integration tests require a working Docker daemon because they spin up PostgreSQL and Redis with Testcontainers.
+
+GitHub Actions runs:
+
+- restore
+- build with warnings as errors
+- integration tests
+- Docker image smoke build
+
+## Postman
+
+The collection is available at [Postman/C# Custom-ish Identity implementation.postman_collection.json](Postman/C%23%20Custom-ish%20Identity%20implementation.postman_collection.json).
+
+Use the `URL` variable for either:
+
+- `http://localhost:5098`
+- `http://api.identity.local`
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

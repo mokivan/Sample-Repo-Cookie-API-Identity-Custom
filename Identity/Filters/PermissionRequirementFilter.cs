@@ -1,29 +1,70 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
+using TestIdentity.Identity.CustomModel;
 
 namespace TestIdentity.Identity.Filters
 {
-    public class PermissionRequirementFilter : IAuthorizationFilter
+    public sealed class PermissionAuthorizationRequirement : IAuthorizationRequirement
     {
-        readonly string[] _permissions;
-
-        public PermissionRequirementFilter(params string[] permissions)
+        public PermissionAuthorizationRequirement(IEnumerable<string> permissions)
         {
-            _permissions = permissions;
+            Permissions = permissions
+                .Select(permission => permission.Trim())
+                .Where(permission => !string.IsNullOrWhiteSpace(permission))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
-        public PermissionRequirementFilter(string permissions)
-        {
-            _permissions = permissions.Split(",");
-        }
+        public IReadOnlyCollection<string> Permissions { get; }
+    }
 
-        public void OnAuthorization(AuthorizationFilterContext context)
+    public sealed class PermissionAuthorizationHandler : AuthorizationHandler<PermissionAuthorizationRequirement>
+    {
+        protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, PermissionAuthorizationRequirement requirement)
         {
-            var hasClaim = context.HttpContext.User.Claims.Any(c => c.Type == "Permission" && _permissions.Contains(c.Value));
-            if (!hasClaim)
+            if (context.User.Identity?.IsAuthenticated != true)
             {
-                context.Result = new ForbidResult();
+                return Task.CompletedTask;
             }
+
+            var permissions = context.User.FindAll(AppClaimTypes.Permission).Select(claim => claim.Value);
+            if (permissions.Intersect(requirement.Permissions, StringComparer.OrdinalIgnoreCase).Any())
+            {
+                context.Succeed(requirement);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    public sealed class PermissionAuthorizationPolicyProvider : DefaultAuthorizationPolicyProvider
+    {
+        public const string PolicyPrefix = "permission:";
+
+        public PermissionAuthorizationPolicyProvider(IOptions<AuthorizationOptions> options)
+            : base(options)
+        {
+        }
+
+        public override Task<AuthorizationPolicy?> GetPolicyAsync(string policyName)
+        {
+            if (!policyName.StartsWith(PolicyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return base.GetPolicyAsync(policyName);
+            }
+
+            var permissionPayload = policyName[PolicyPrefix.Length..];
+            var permissions = permissionPayload.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            var policy = new AuthorizationPolicyBuilder()
+                .AddRequirements(new PermissionAuthorizationRequirement(permissions))
+                .Build();
+
+            return Task.FromResult<AuthorizationPolicy?>(policy);
+        }
+
+        public static string BuildPolicyName(string permissions)
+        {
+            return $"{PolicyPrefix}{permissions}";
         }
     }
 }

@@ -1,12 +1,13 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 
 namespace TestIdentity.Identity.Filters
 {
-    public class PermissionRequirementAttribute : TypeFilterAttribute
+    public class PermissionRequirementAttribute : AuthorizeAttribute
     {
-        public PermissionRequirementAttribute(string Permission) : base(typeof(PermissionRequirementFilter))
+        public PermissionRequirementAttribute(string permission)
         {
-            Arguments = new object[] { Permission };
+            ArgumentException.ThrowIfNullOrWhiteSpace(permission);
+            Policy = PermissionAuthorizationPolicyProvider.BuildPolicyName(permission);
         }
     }
 }

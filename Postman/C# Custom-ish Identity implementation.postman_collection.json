@@ -1,263 +1,281 @@
 {
-	"info": {
-		"_postman_id": "2a80464e-2658-47be-9239-fec7d961ad0e",
-		"name": "C# Custom-ish Identity implementation (Cookie)",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-		"_exporter_id": "7349351"
-	},
-	"item": [
-		{
-			"name": "My info",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/me",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"me"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "01_Register",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"Name\":\"Ivan\",\r\n    \"Email\":\"ivan@example.com\",\r\n    \"Username\":\"admin\",\r\n    \"Password\":\"RhnokAKnN%9fmVY\",\r\n    \"Roles\": [ 1, 2 ]\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{URL}}/register",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"register"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "02_Login",
-			"event": [
-				{
-					"listen": "test",
-					"script": {
-						"exec": [
-							""
-						],
-						"type": "text/javascript"
-					}
-				}
-			],
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "raw",
-					"raw": "{\r\n    \"Username\":\"admin\",\r\n    \"Password\":\"RhnokAKnN%9fmVY\",\r\n    \"RememberMe\": false\r\n}",
-					"options": {
-						"raw": {
-							"language": "json"
-						}
-					}
-				},
-				"url": {
-					"raw": "{{URL}}/login",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"login"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "03_My sessions",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/sessions",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"sessions"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "04_Test Superuser Role",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/api/test-role",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"api",
-						"test-role"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "05_Test non-existant Role",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/api/test-role-dont-exists",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"api",
-						"test-role-dont-exists"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "06_Test requiered Authenticated user",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/api/WeatherForecast",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"api",
-						"WeatherForecast"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "07_Test ReadSingleForecast Permission",
-			"request": {
-				"method": "GET",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/api/WeatherForecast/single",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"api",
-						"WeatherForecast",
-						"single"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "07_Test CreateForecast Permission",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/api/WeatherForecast",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"api",
-						"WeatherForecast"
-					]
-				}
-			},
-			"response": []
-		},
-		{
-			"name": "Logout",
-			"event": [
-				{
-					"listen": "test",
-					"script": {
-						"exec": [
-							""
-						],
-						"type": "text/javascript"
-					}
-				}
-			],
-			"request": {
-				"method": "POST",
-				"header": [],
-				"url": {
-					"raw": "{{URL}}/logout",
-					"host": [
-						"{{URL}}"
-					],
-					"path": [
-						"logout"
-					]
-				}
-			},
-			"response": []
-		}
-	],
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
-				]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
-				]
-			}
-		}
-	],
-	"variable": [
-		{
-			"key": "BEARER_TOKEN",
-			"value": ""
-		},
-		{
-			"key": "URL",
-			"value": "https://api.identity.local",
-			"type": "string"
-		},
-		{
-			"key": "URL",
-			"value": "http://localhost:5098",
-			"type": "string",
-			"disabled": true
-		}
-	]
+  "info": {
+    "_postman_id": "2a80464e-2658-47be-9239-fec7d961ad0e",
+    "name": "C# Custom-ish Identity implementation (Cookie)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "7349351"
+  },
+  "item": [
+    {
+      "name": "01_Register",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"Name\": \"Ivan\",\r\n  \"Email\": \"ivan@example.com\",\r\n  \"Username\": \"admin\",\r\n  \"Password\": \"RhnokAKnN%9fmVY\",\r\n  \"Roles\": [1, 2]\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{URL}}/register",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "register"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "02_Login",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"Username\": \"admin\",\r\n  \"Password\": \"RhnokAKnN%9fmVY\",\r\n  \"RememberMe\": false\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{URL}}/login",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "login"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "03_Me",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/me",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "me"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "04_Sessions",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/sessions",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "sessions"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "05_Test Superuser Role",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/api/test-role",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "api",
+            "test-role"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "06_Test Missing Role",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/api/test-role-dont-exists",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "api",
+            "test-role-dont-exists"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "07_Test Authenticated User",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/api/WeatherForecast",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "api",
+            "WeatherForecast"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "08_Test ReadSingleForecast Permission",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/api/WeatherForecast/single",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "api",
+            "WeatherForecast",
+            "single"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "09_Test CreateForecast Permission",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/api/WeatherForecast",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "api",
+            "WeatherForecast"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "10_Logout Current Session",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/logout",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "logout"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "11_Logout Specific Session",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/logout?sid={{SESSION_ID}}",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "logout"
+          ],
+          "query": [
+            {
+              "key": "sid",
+              "value": "{{SESSION_ID}}"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "12_Logout All",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{URL}}/logout-all",
+          "host": [
+            "{{URL}}"
+          ],
+          "path": [
+            "logout-all"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "SESSION_ID",
+      "value": ""
+    },
+    {
+      "key": "URL",
+      "value": "http://api.identity.local",
+      "type": "string"
+    },
+    {
+      "key": "URL",
+      "value": "http://localhost:5098",
+      "type": "string",
+      "disabled": true
+    }
+  ]
 }

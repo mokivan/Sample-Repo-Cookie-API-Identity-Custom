@@ -1,8 +1,7 @@
-﻿using Microsoft.AspNetCore.Authentication.Cookies;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
 using TestIdentity.Identity.CustomModel;
 using TestIdentity.Identity.DTO;
 using TestIdentity.Identity.Stores;
@@ -10,43 +9,59 @@ using TestIdentity.Identity.Stores;
 namespace TestIdentity.Controllers
 {
     [ApiController]
-    public class AuthenticateController : ControllerBase
+    public class AuthController : ControllerBase
     {
         private readonly SignInManager<AppUser> _signInManager;
         private readonly UserManager<AppUser> _userManager;
         private readonly ICustomSessionStore _sessionStore;
 
-        public AuthenticateController(SignInManager<AppUser> signInManager, ITicketStore ticketStore, UserManager<AppUser> userManager)
+        public AuthController(
+            SignInManager<AppUser> signInManager,
+            UserManager<AppUser> userManager,
+            ICustomSessionStore sessionStore)
         {
             _signInManager = signInManager;
-            _sessionStore = (ICustomSessionStore)ticketStore;
             _userManager = userManager;
+            _sessionStore = sessionStore;
         }
 
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginModel model, CancellationToken token)
+        public async Task<IActionResult> Login([FromBody] LoginModel model)
         {
-            var user = await _userManager.FindByNameAsync(model.Username ?? "");
-            if (user != null && await _userManager.CheckPasswordAsync(user, model.Password ?? ""))
+            var user = await _userManager.FindByNameAsync(model.Username);
+            if (user is null || !await _userManager.CheckPasswordAsync(user, model.Password))
             {
-                await _signInManager.SignInWithClaimsAsync(user, model.RememberMe ?? false, user.Permissions);
-                return Ok();
+                return Unauthorized();
             }
 
-            return Unauthorized();
+            await _signInManager.SignInWithClaimsAsync(user, model.RememberMe, user.Permissions);
+            return Ok();
         }
 
+        [AllowAnonymous]
         [HttpPost("logout")]
         public async Task<IActionResult> Logout([FromQuery(Name = "sid")] string sessionId = "")
         {
             if (string.IsNullOrWhiteSpace(sessionId))
             {
                 await _signInManager.SignOutAsync();
+                return Ok();
             }
-            else
+
+            if (User.Identity?.IsAuthenticated != true || string.IsNullOrWhiteSpace(User.Identity.Name))
             {
-                var ticketStore = (ITicketStore)_sessionStore;
-                await ticketStore.RemoveAsync(sessionId);
+                return Unauthorized();
+            }
+
+            var removed = await _sessionStore.RemoveOwnedSessionAsync(User.Identity.Name, sessionId);
+            if (!removed)
+            {
+                return NotFound();
+            }
+
+            if (string.Equals(User.FindFirstValue(TicketStore.SessionIdClaimType), sessionId, StringComparison.Ordinal))
+            {
+                await _signInManager.SignOutAsync();
             }
 
             return Ok();
@@ -60,57 +75,65 @@ namespace TestIdentity.Controllers
             {
                 return Ok();
             }
-            else
+
+            foreach (var error in result.Errors)
             {
-                return BadRequest(result.Errors);
+                ModelState.AddModelError(error.Code, error.Description);
             }
+
+            return ValidationProblem(ModelState);
         }
 
+        [AllowAnonymous]
         [HttpGet("me")]
         public IActionResult GetMyInfo()
         {
-            var principal = this.User;
-            return Ok(
-                    new
-                    {
-                        Name = principal?.Identity?.Name ?? "Anonimo",
-                        Roles = principal?.Claims.Where(x => x.Type == ClaimTypes.Role).Select(x => x.Value),
-                        Permissions = principal?.Claims?.Where(x => x.Type == "Permission").Select(x => x.Value),
-                        principal?.Identity?.IsAuthenticated,
-                        CurrentSid = principal?.Claims?.Where(x => x.Type == "SID").Select(x => x.Value).FirstOrDefault(string.Empty)
-                    }
-                );
+            return Ok(new CurrentUserResponse
+            {
+                Name = User.Identity?.Name ?? "Anonymous",
+                Roles = User.FindAll(ClaimTypes.Role).Select(claim => claim.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                Permissions = User.FindAll(AppClaimTypes.Permission).Select(claim => claim.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                IsAuthenticated = User.Identity?.IsAuthenticated ?? false,
+                CurrentSid = User.FindFirstValue(TicketStore.SessionIdClaimType)
+            });
         }
 
         [Authorize]
         [HttpGet("sessions")]
-        public IActionResult GetSessions()
+        public async Task<ActionResult<IReadOnlyCollection<SessionInfoResponse>>> GetSessions(CancellationToken cancellationToken)
         {
             var username = User.Identity?.Name;
-            var sessions = _sessionStore.GetSessions(username!);
-            var result = new List<dynamic>();
-            foreach (var session in sessions.Distinct())
+            if (string.IsNullOrWhiteSpace(username))
             {
-                var _new = new
-                {
-                    SessionId = session.Properties.GetString(TicketStore.SessionIdClaimType),
-                    session.AuthenticationScheme,
-                    session.Properties.IssuedUtc,
-                    ExpiresUtc = session.Properties.IsPersistent ? null : session.Properties.ExpiresUtc,
-                    session.Properties.IsPersistent,
-                    session.Properties.AllowRefresh
-                };
-                result.Add(_new);
+                return Unauthorized();
             }
-            return Ok(result);
+
+            var sessions = await _sessionStore.GetSessionsAsync(username, cancellationToken);
+            var response = sessions.Select(session => new SessionInfoResponse
+            {
+                SessionId = session.Properties.GetString(TicketStore.SessionIdPropertyName),
+                AuthenticationScheme = session.AuthenticationScheme,
+                IssuedUtc = session.Properties.IssuedUtc,
+                ExpiresUtc = session.Properties.ExpiresUtc,
+                IsPersistent = session.Properties.IsPersistent,
+                AllowRefresh = session.Properties.AllowRefresh
+            }).ToArray();
+
+            return Ok(response);
         }
 
         [Authorize]
         [HttpPost("logout-all")]
-        public async Task<IActionResult> LogoutAll()
+        public async Task<IActionResult> LogoutAll(CancellationToken cancellationToken)
         {
-            var username = User?.Identity?.Name;
-            await _sessionStore.RemoveAllAsync(username!);
+            var username = User.Identity?.Name;
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                return Unauthorized();
+            }
+
+            await _sessionStore.RemoveAllAsync(username, cancellationToken);
+            await _signInManager.SignOutAsync();
 
             return Ok();
         }

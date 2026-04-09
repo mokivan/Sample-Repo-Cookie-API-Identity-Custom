@@ -1,39 +1,67 @@
-version: '3'
 services:
   reverse-proxy:
-    image: nginx
+    image: nginx:1.27-alpine
     depends_on:
-      - test-identity-api-1
-      - test-identity-api-2
+      test-identity-api-1:
+        condition: service_started
+      test-identity-api-2:
+        condition: service_started
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - 80:80
-      - 443:443
+      - "80:80"
 
   test-identity-api-1:
-    image: test-identity-api:latest
+    image: sample-identity:latest
+    build:
+      context: .
     environment:
-      ASPNET_ENVIRONMENT: Development
-      ASPNETCORE_URLS: "http://+:80"
-      TestIdentity_ConnectionStrings__RedisConn: "redis:6379,name=TestIdentity"
-      TestIdentity_ConnectionStrings__Default: ${CONNECTION_STRING}
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      TestIdentity_ConnectionStrings__RedisConn: redis:6379,name=TestIdentity
+      TestIdentity_ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-test_identity};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres};Include Error Detail=true
     depends_on:
-      - redis
-    links:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   test-identity-api-2:
-    image: test-identity-api:latest
+    image: sample-identity:latest
+    build:
+      context: .
     environment:
-      ASPNET_ENVIRONMENT: Development
-      ASPNETCORE_URLS: "http://+:80"
-      TestIdentity_ConnectionStrings__RedisConn: "redis:6379,name=TestIdentity"
-      TestIdentity_ConnectionStrings__Default: ${CONNECTION_STRING}
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      TestIdentity_ConnectionStrings__RedisConn: redis:6379,name=TestIdentity
+      TestIdentity_ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-test_identity};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres};Include Error Detail=true
     depends_on:
-      - redis
-    links:
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-test_identity}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-test_identity}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
 
   redis:
-    image: redis:3.0
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

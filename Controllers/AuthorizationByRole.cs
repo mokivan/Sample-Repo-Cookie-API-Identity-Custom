@@ -6,8 +6,8 @@ namespace TestIdentity.Controllers
 {
     [Route("api/test-role-dont-exists")]
     [ApiController]
-    [Authorize(Roles = "non-existant")]
-    public class AuthorizationByRole : ControllerBase
+    [Authorize(Roles = "DoesNotExist")]
+    public class AuthorizationByMissingRoleController : ControllerBase
     {
         [HttpGet]
         public IActionResult Get()

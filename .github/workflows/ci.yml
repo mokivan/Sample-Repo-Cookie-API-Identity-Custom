@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore TestIdentityCookie.sln
+
+      - name: Build
+        run: dotnet build TestIdentityCookie.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test TestIdentity.IntegrationTests/TestIdentity.IntegrationTests.csproj --configuration Release --no-build
+
+      - name: Docker build smoke test
+        run: docker build . --tag sample-identity:ci

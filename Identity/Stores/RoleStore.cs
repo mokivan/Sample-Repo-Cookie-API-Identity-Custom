@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using TestIdentity.Identity.CustomModel;
 
 namespace TestIdentity.Identity.Stores
@@ -14,42 +15,32 @@ namespace TestIdentity.Identity.Stores
 
         public async Task<IdentityResult> CreateAsync(AppRole role, CancellationToken cancellationToken)
         {
-            IdentityResult result;
             try
             {
                 _appContext.Roles.Add(role);
                 await _appContext.SaveChangesAsync(cancellationToken);
-                result = IdentityResult.Success;
             }
             catch (Exception ex)
             {
-                result = IdentityResult.Failed(new IdentityError()
-                {
-                    Code = ex.Message,
-                    Description = ex.StackTrace ?? "Empty description"
-                });
+                return IdentityResult.Failed(CreateError(ex, "Unable to create role."));
             }
-            return result;
+
+            return IdentityResult.Success;
         }
 
         public async Task<IdentityResult> DeleteAsync(AppRole role, CancellationToken cancellationToken)
         {
-            IdentityResult result;
             try
             {
                 _appContext.Roles.Remove(role);
                 await _appContext.SaveChangesAsync(cancellationToken);
-                result = IdentityResult.Success;
             }
             catch (Exception ex)
             {
-                result = IdentityResult.Failed(new IdentityError()
-                {
-                    Code = ex.Message,
-                    Description = ex.StackTrace ?? "Empty description"
-                });
+                return IdentityResult.Failed(CreateError(ex, "Unable to delete role."));
             }
-            return result;
+
+            return IdentityResult.Success;
         }
 
         public void Dispose()
@@ -58,87 +49,77 @@ namespace TestIdentity.Identity.Stores
 
         public async Task<AppRole?> FindByIdAsync(string roleId, CancellationToken cancellationToken)
         {
-            return await _appContext.Roles.FindAsync(roleId, cancellationToken);
+            return int.TryParse(roleId, out var parsedRoleId)
+                ? await _appContext.Roles.SingleOrDefaultAsync(role => role.Id == parsedRoleId, cancellationToken)
+                : null;
         }
 
-        public async Task<AppRole?> FindByNameAsync(string normalizedRoleName, CancellationToken cancellationToken)
+        public Task<AppRole?> FindByNameAsync(string normalizedRoleName, CancellationToken cancellationToken)
         {
-            return _appContext.Roles.First(x => x.Name == normalizedRoleName);
+            var normalized = Normalize(normalizedRoleName);
+            return _appContext.Roles.SingleOrDefaultAsync(role => role.NormalizedName == normalized, cancellationToken);
         }
 
         public Task<string?> GetNormalizedRoleNameAsync(AppRole role, CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                return Task.FromResult(role?.Name?.ToLowerInvariant());
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(role.NormalizedName);
         }
 
         public Task<string> GetRoleIdAsync(AppRole role, CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                return Task.FromResult(role?.Id.ToString() ?? "");
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(role.Id.ToString());
         }
 
         public Task<string?> GetRoleNameAsync(AppRole role, CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                return Task.FromResult(role?.Name);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<string?>(role.Name);
         }
 
         public Task SetNormalizedRoleNameAsync(AppRole role, string? normalizedName, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            role.NormalizedName = Normalize(normalizedName);
             return Task.CompletedTask;
         }
 
         public Task SetRoleNameAsync(AppRole role, string? roleName, CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(roleName, nameof(roleName));
-            while (true)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                }
-                role.Name = roleName;
-                return Task.CompletedTask;
-            }
+            ArgumentNullException.ThrowIfNull(roleName);
+            cancellationToken.ThrowIfCancellationRequested();
+            role.Name = roleName;
+            return Task.CompletedTask;
         }
 
         public async Task<IdentityResult> UpdateAsync(AppRole role, CancellationToken cancellationToken)
         {
-            IdentityResult result;
             try
             {
                 _appContext.Roles.Update(role);
                 await _appContext.SaveChangesAsync(cancellationToken);
-                result = IdentityResult.Success;
             }
             catch (Exception ex)
             {
-                result = IdentityResult.Failed(new IdentityError()
-                {
-                    Code = ex.Message,
-                    Description = ex.StackTrace ?? "Empty description"
-                });
+                return IdentityResult.Failed(CreateError(ex, "Unable to update role."));
             }
-            return result;
+
+            return IdentityResult.Success;
+        }
+
+        private static IdentityError CreateError(Exception exception, string description)
+        {
+            return new IdentityError
+            {
+                Code = exception.GetType().Name,
+                Description = description
+            };
+        }
+
+        private static string Normalize(string? value)
+        {
+            return value?.Trim().ToUpperInvariant() ?? string.Empty;
         }
     }
 }

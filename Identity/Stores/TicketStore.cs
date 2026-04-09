@@ -1,150 +1,281 @@
-﻿using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.EntityFrameworkCore.Metadata.Internal;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
-using Newtonsoft.Json;
-using System.Net;
 using System.Security.Claims;
+using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Options;
 
 namespace TestIdentity.Identity.Stores
 {
     public class TicketStore : ITicketStore, ICustomSessionStore
     {
-        private const string TicketPrefix = "AuthTicket";
-        public const string SessionIdClaimType = "SID";
+        private static readonly JsonSerializerOptions JsonSerializerOptions = new(JsonSerializerDefaults.Web);
+
+        public const string SessionIdClaimType = ClaimTypes.Sid;
+        public const string SessionIdPropertyName = "session_id";
 
         private readonly IDistributedCache _cache;
         private readonly ILogger<TicketStore> _logger;
+        private readonly IOptionsMonitor<CookieAuthenticationOptions> _cookieOptionsMonitor;
+        private readonly TimeProvider _timeProvider;
 
-        public TicketStore(IDistributedCache cache, ILogger<TicketStore> logger)
+        public TicketStore(
+            IDistributedCache cache,
+            ILogger<TicketStore> logger,
+            IOptionsMonitor<CookieAuthenticationOptions> cookieOptionsMonitor,
+            TimeProvider timeProvider)
         {
             _cache = cache;
             _logger = logger;
+            _cookieOptionsMonitor = cookieOptionsMonitor;
+            _timeProvider = timeProvider;
         }
 
-        public Task RemoveAsync(string key)
+        public async Task RemoveAsync(string key)
         {
-            _ = Task.Run(() =>
+            var ticket = await RetrieveAsync(key);
+            await _cache.RemoveAsync(GetTicketCacheKey(key));
+
+            if (ticket is null)
             {
-                var serializedTicket = _cache.Get($"{TicketPrefix}_{key}");
-                if (serializedTicket != null)
-                {
-                    var ticket = TicketSerializer.Default.Deserialize(serializedTicket);
-                    var username = ticket?.Principal?.Identity?.Name?.ToLower();
-                    
-                    List<string> tickets;
-                    var serializedTickets = _cache.GetString($"{username}_Tickets");
-                    if (serializedTickets != null)
-                    {
-                        tickets = JsonConvert.DeserializeObject<List<string>>(serializedTickets) ?? new();
-                        tickets?.Remove(key);
-                        _cache.SetString($"{username}_Tickets", JsonConvert.SerializeObject(tickets));
-                    }
-                }
-            });
-            _cache.Remove(key);
-            return Task.CompletedTask;
+                return;
+            }
+
+            var username = Normalize(ticket.Principal.Identity?.Name);
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                return;
+            }
+
+            var sessionIds = await GetSessionIdIndexAsync(username);
+            if (sessionIds.Remove(key))
+            {
+                await PersistSessionIdIndexAsync(username, sessionIds, null);
+            }
         }
 
-        public Task RenewAsync(string key, AuthenticationTicket ticket)
+        public async Task RenewAsync(string key, AuthenticationTicket ticket)
         {
-            _cache.Remove($"{TicketPrefix}_{key}");
+            var sessionId = EnsureSessionId(ticket, key);
+            var entryOptions = CreateCacheEntryOptions(ticket);
             var serializedTicket = TicketSerializer.Default.Serialize(ticket);
-            
-            _cache.Set($"{TicketPrefix}_{key}", serializedTicket);
+            await _cache.SetAsync(GetTicketCacheKey(sessionId), serializedTicket, entryOptions);
 
-            return Task.CompletedTask;
+            var username = Normalize(ticket.Principal.Identity?.Name);
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                var sessionIds = await GetSessionIdIndexAsync(username);
+                sessionIds.Add(sessionId);
+                await PersistSessionIdIndexAsync(username, sessionIds, entryOptions);
+            }
         }
 
-        public Task<AuthenticationTicket?> RetrieveAsync(string key)
+        public async Task<AuthenticationTicket?> RetrieveAsync(string key)
         {
-            AuthenticationTicket? ticket = null;
-
-            var serializedTicket = _cache.Get(key);
-            if (serializedTicket != null)
-            {
-                ticket = TicketSerializer.Default.Deserialize(serializedTicket);
-            }
-            return Task.FromResult(ticket);
+            var serializedTicket = await _cache.GetAsync(GetTicketCacheKey(key));
+            return serializedTicket is null ? null : TicketSerializer.Default.Deserialize(serializedTicket);
         }
 
-        public Task<string> StoreAsync(AuthenticationTicket ticket)
+        public async Task<string> StoreAsync(AuthenticationTicket ticket)
         {
-            var key = ticket.Principal.Claims.Where(x => x.Type == SessionIdClaimType).FirstOrDefault()?.Value;
-            if(key  == null)
-            {
-                key = $"{TicketPrefix}_{Guid.NewGuid()}";
-                ticket.Principal?.AddIdentity(new ClaimsIdentity(new List<Claim>()
-                {
-                    new(SessionIdClaimType, key)
-                }));
-            }
-            var username = ticket.Principal?.Identity?.Name?.ToLower();
-
-            List<string> tickets;
-            var serializedTickets = _cache.GetString($"{username}_Tickets");
-            if(serializedTickets != null)
-            {
-                tickets = JsonConvert.DeserializeObject<List<string>>(serializedTickets) ?? new();
-            } else
-            {
-                tickets = new();
-            }
-
-            tickets.Add(key);
-
-            ticket.Properties.SetString(SessionIdClaimType, key);
+            var sessionId = EnsureSessionId(ticket);
+            var entryOptions = CreateCacheEntryOptions(ticket);
             var serializedTicket = TicketSerializer.Default.Serialize(ticket);
-            _cache.Set(key, serializedTicket);
-            _cache.SetString($"{username}_Tickets", JsonConvert.SerializeObject(tickets));
+            await _cache.SetAsync(GetTicketCacheKey(sessionId), serializedTicket, entryOptions);
 
-            return Task.FromResult(key);
+            var username = Normalize(ticket.Principal.Identity?.Name);
+            if (!string.IsNullOrWhiteSpace(username))
+            {
+                var sessionIds = await GetSessionIdIndexAsync(username);
+                sessionIds.Add(sessionId);
+                await PersistSessionIdIndexAsync(username, sessionIds, entryOptions);
+            }
+
+            return sessionId;
         }
 
-        public IEnumerable<AuthenticationTicket> GetSessions(string username)
+        public async Task<IReadOnlyCollection<AuthenticationTicket>> GetSessionsAsync(string username, CancellationToken cancellationToken = default)
         {
-            var hostName = Dns.GetHostName();
-            var myIP = Dns.GetHostByName(hostName).AddressList[0].ToString();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("Retriving sessions for {username} from PC: {machine} - {IP}", username, hostName, myIP);
+            var normalizedUsername = Normalize(username);
+            var sessionIds = await GetSessionIdIndexAsync(normalizedUsername);
+            if (sessionIds.Count == 0)
+            {
+                return Array.Empty<AuthenticationTicket>();
+            }
+
             var sessions = new List<AuthenticationTicket>();
+            var staleSessionIds = new List<string>();
 
-            var serializedTickets = _cache.GetString($"{username.ToLower()}_Tickets");
-            List<string> tickets;
-            if (serializedTickets != null)
+            foreach (var sessionId in sessionIds)
             {
-                tickets = JsonConvert.DeserializeObject<List<string>>(serializedTickets) ?? new();
-            } else
-            {
-                tickets = new();
-            }
+                cancellationToken.ThrowIfCancellationRequested();
 
-            foreach (var ticket in tickets)
-            {
-                _logger.LogInformation("Retriving ticket for id {SessionId}", ticket);
-                var serializedSession = _cache.Get(ticket);
-
-                if (serializedSession != null)
+                var ticket = await RetrieveAsync(sessionId);
+                if (ticket is null)
                 {
-                    var session = TicketSerializer.Default.Deserialize(serializedSession);
-                    sessions.Add(session!);
+                    staleSessionIds.Add(sessionId);
+                    continue;
                 }
+
+                sessions.Add(ticket);
             }
 
-            return sessions;
+            if (staleSessionIds.Count > 0)
+            {
+                foreach (var staleSessionId in staleSessionIds)
+                {
+                    sessionIds.Remove(staleSessionId);
+                }
+
+                await PersistSessionIdIndexAsync(normalizedUsername, sessionIds, null);
+            }
+
+            _logger.LogInformation("Retrieved {SessionCount} active sessions for {Username}.", sessions.Count, normalizedUsername);
+            return sessions
+                .OrderByDescending(ticket => ticket.Properties.IssuedUtc ?? DateTimeOffset.MinValue)
+                .ToArray();
         }
 
-        public Task RemoveAllAsync(string username)
+        public async Task<bool> RemoveOwnedSessionAsync(string username, string sessionId, CancellationToken cancellationToken = default)
         {
-            foreach (var session in GetSessions(username.ToLower()))
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var normalizedUsername = Normalize(username);
+            var normalizedSessionId = sessionId.Trim();
+            if (string.IsNullOrWhiteSpace(normalizedUsername) || string.IsNullOrWhiteSpace(normalizedSessionId))
             {
-                var key = session.Properties.GetString("SessionId");
-                RemoveAsync($"{TicketPrefix}_{key}");
+                return false;
             }
 
-            _cache.Remove($"{username.ToLower()}_Tickets");
-            return Task.CompletedTask;
+            var sessionIds = await GetSessionIdIndexAsync(normalizedUsername);
+            if (!sessionIds.Contains(normalizedSessionId))
+            {
+                return false;
+            }
+
+            await RemoveAsync(normalizedSessionId);
+            return true;
+        }
+
+        public async Task RemoveAllAsync(string username, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var normalizedUsername = Normalize(username);
+            var sessionIds = await GetSessionIdIndexAsync(normalizedUsername);
+            foreach (var sessionId in sessionIds)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await _cache.RemoveAsync(GetTicketCacheKey(sessionId), cancellationToken);
+            }
+
+            await _cache.RemoveAsync(GetUserSessionsCacheKey(normalizedUsername), cancellationToken);
+        }
+
+        private async Task<HashSet<string>> GetSessionIdIndexAsync(string normalizedUsername)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedUsername))
+            {
+                return new HashSet<string>(StringComparer.Ordinal);
+            }
+
+            var serializedSessionIds = await _cache.GetStringAsync(GetUserSessionsCacheKey(normalizedUsername));
+            return string.IsNullOrWhiteSpace(serializedSessionIds)
+                ? new HashSet<string>(StringComparer.Ordinal)
+                : JsonSerializer.Deserialize<HashSet<string>>(serializedSessionIds, JsonSerializerOptions) ?? new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        private async Task PersistSessionIdIndexAsync(
+            string normalizedUsername,
+            HashSet<string> sessionIds,
+            DistributedCacheEntryOptions? entryOptions)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedUsername))
+            {
+                return;
+            }
+
+            if (sessionIds.Count == 0)
+            {
+                await _cache.RemoveAsync(GetUserSessionsCacheKey(normalizedUsername));
+                return;
+            }
+
+            var effectiveEntryOptions = entryOptions ?? CreateUserIndexEntryOptions();
+            var serializedSessionIds = JsonSerializer.Serialize(sessionIds, JsonSerializerOptions);
+            await _cache.SetStringAsync(GetUserSessionsCacheKey(normalizedUsername), serializedSessionIds, effectiveEntryOptions);
+        }
+
+        private DistributedCacheEntryOptions CreateCacheEntryOptions(AuthenticationTicket ticket)
+        {
+            var now = _timeProvider.GetUtcNow();
+            var cookieOptions = _cookieOptionsMonitor.Get(IdentityConstants.ApplicationScheme);
+            var expiresUtc = ticket.Properties.ExpiresUtc
+                ?? ticket.Properties.IssuedUtc?.Add(cookieOptions.ExpireTimeSpan)
+                ?? now.Add(cookieOptions.ExpireTimeSpan);
+
+            return new DistributedCacheEntryOptions
+            {
+                AbsoluteExpiration = expiresUtc
+            };
+        }
+
+        private DistributedCacheEntryOptions CreateUserIndexEntryOptions()
+        {
+            var cookieOptions = _cookieOptionsMonitor.Get(IdentityConstants.ApplicationScheme);
+            return new DistributedCacheEntryOptions
+            {
+                AbsoluteExpiration = _timeProvider.GetUtcNow().Add(cookieOptions.ExpireTimeSpan)
+            };
+        }
+
+        private static string EnsureSessionId(AuthenticationTicket ticket, string? requestedSessionId = null)
+        {
+            var sessionId = requestedSessionId;
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                sessionId = ticket.Principal.FindFirstValue(SessionIdClaimType);
+            }
+
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                sessionId = Guid.NewGuid().ToString("N");
+            }
+
+            ticket.Properties.SetString(SessionIdPropertyName, sessionId);
+
+            var identity = ticket.Principal.Identities.FirstOrDefault() ?? new ClaimsIdentity();
+            var existingClaim = identity.FindFirst(SessionIdClaimType);
+            if (existingClaim is not null)
+            {
+                identity.RemoveClaim(existingClaim);
+            }
+
+            identity.AddClaim(new Claim(SessionIdClaimType, sessionId));
+            if (!ticket.Principal.Identities.Contains(identity))
+            {
+                ticket.Principal.AddIdentity(identity);
+            }
+
+            return sessionId;
+        }
+
+        private static string GetTicketCacheKey(string sessionId)
+        {
+            return $"auth:ticket:{sessionId}";
+        }
+
+        private static string GetUserSessionsCacheKey(string normalizedUsername)
+        {
+            return $"auth:user-sessions:{normalizedUsername}";
+        }
+
+        private static string Normalize(string? value)
+        {
+            return value?.Trim().ToUpperInvariant() ?? string.Empty;
         }
     }
 }

@@ -1,25 +1,38 @@
-﻿using TestIdentity.Identity.CustomModel;
+using System.ComponentModel.DataAnnotations;
+using TestIdentity.Identity.CustomModel;
 
 namespace TestIdentity.Identity.DTO
 {
     public class RegisterModel
     {
-        public string Name { get; set; }
-        public string Email { get; set; }
-        public string Username { get; set; }
-        public string Password { get; set; }
+        [Required]
+        [StringLength(128, MinimumLength = 2)]
+        public string Name { get; set; } = string.Empty;
 
-        public List<int> Roles { get; set; }
+        [Required]
+        [EmailAddress]
+        [StringLength(256)]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(128, MinimumLength = 3)]
+        public string Username { get; set; } = string.Empty;
+
+        [Required]
+        [StringLength(128, MinimumLength = 12)]
+        public string Password { get; set; } = string.Empty;
+
+        public List<int> Roles { get; set; } = new();
 
         public AppUser AsAppUser()
         {
-            return new AppUser()
+            return new AppUser
             {
-                Name = Name,
-                Email = Email,
-                Username = Username,
-                Password = Password,
-                Roles = this.Roles.Select(x => new AppRole() { Id = x }).ToList()
+                Name = Name.Trim(),
+                Email = Email.Trim(),
+                EmailConfirmed = true,
+                Username = Username.Trim(),
+                Roles = Roles.Select(roleId => new AppRole { Id = roleId }).ToList()
             };
         }
     }

@@ -1,5 +1,4 @@
-version: '3'
 services:
   test-identity-api:
-    image: test-identity-api:latest
+    image: sample-identity:latest
     build: .

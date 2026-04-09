@@ -11,20 +11,12 @@ namespace TestIdentity.Controllers
     {
         private static readonly string[] Summaries = new[]
         {
-        "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-    };
-
-        private readonly ILogger<WeatherForecastController> _logger;
-
-        public WeatherForecastController(ILogger<WeatherForecastController> logger)
-        {
-            _logger = logger;
-        }
+            "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
+        };
 
         [HttpGet]
         public IEnumerable<WeatherForecast> Get()
         {
-            var principal = this.User;
             return Enumerable.Range(1, 5).Select(index => new WeatherForecast
             {
                 Date = DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
@@ -51,7 +43,7 @@ namespace TestIdentity.Controllers
         [PermissionRequirement("CreateForecast")]
         public IActionResult PostForecast()
         {
-            return Created("/api/forecasts", new WeatherForecast()
+            return Created("/api/weatherforecast", new WeatherForecast
             {
                 Date = DateOnly.FromDateTime(DateTime.Now),
                 TemperatureC = 10,
