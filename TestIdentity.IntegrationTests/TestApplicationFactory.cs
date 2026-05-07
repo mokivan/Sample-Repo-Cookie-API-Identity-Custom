@@ -51,7 +51,9 @@ public sealed class TestApplicationFactory : WebApplicationFactory<Program>, IAs
             configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Default"] = PostgresConnectionString,
-                ["ConnectionStrings:RedisConn"] = RedisConnectionString
+                ["ConnectionStrings:RedisConn"] = RedisConnectionString,
+                ["Security:AllowSelfAssignedRoles"] = "true",
+                ["Security:RequireHttpsForAuthCookie"] = "false"
             });
         });
     }

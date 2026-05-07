@@ -24,7 +24,7 @@ namespace TestIdentity.Identity.DTO
 
         public List<int> Roles { get; set; } = new();
 
-        public AppUser AsAppUser()
+        public AppUser AsAppUser(IEnumerable<int>? roleIds = null)
         {
             return new AppUser
             {
@@ -32,7 +32,7 @@ namespace TestIdentity.Identity.DTO
                 Email = Email.Trim(),
                 EmailConfirmed = true,
                 Username = Username.Trim(),
-                Roles = Roles.Select(roleId => new AppRole { Id = roleId }).ToList()
+                Roles = (roleIds ?? Roles).Select(roleId => new AppRole { Id = roleId }).ToList()
             };
         }
     }

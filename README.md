@@ -27,6 +27,7 @@ The following pieces are custom on purpose because they help explain how ASP.NET
 - Migration-based schema management with EF Core
 - Unique indexes for normalized usernames, emails, and role names
 - Explicit cookie settings and predictable API auth responses (`401` / `403`)
+- Safer defaults for cookies, forwarded headers, and operational debug headers
 - Session ownership checks before targeted logout
 - Integration tests against PostgreSQL and Redis with Testcontainers
 - CI that restores, builds, tests, and smoke-builds the Docker image
@@ -36,6 +37,7 @@ The following pieces are custom on purpose because they help explain how ASP.NET
 - There is no account recovery flow, email confirmation flow, MFA, lockout tuning, audit trail, or admin UI.
 - Roles and permissions are seeded for demonstration, not managed dynamically.
 - The sample optimizes for clarity over abstraction reuse.
+- Local/demo conveniences are intentionally configuration-driven and should stay disabled in production.
 
 ## Solution layout
 
@@ -86,6 +88,40 @@ dotnet run --launch-profile http
 
 At startup, non-production environments automatically apply EF Core migrations.
 
+## Security configuration
+
+The sample now separates secure defaults from local/demo behavior with a `Security` section in configuration.
+
+Default behavior from [appsettings.json](appsettings.json):
+
+- `AllowSelfAssignedRoles = false`
+  Anonymous registration does not honor role IDs sent by the client.
+- `ExposeMachineDebugHeaders = false`
+  `X-Machine-Name` and `X-Machine-Ip` are off by default.
+- `RequireHttpsForAuthCookie = true`
+  Authentication cookies default to `SecurePolicy = Always`.
+- `TrustedProxies` and `TrustedNetworks` are empty
+  Forwarded headers are enabled, but trust should only be extended explicitly when running behind a known reverse proxy.
+
+Local/demo behavior from [appsettings.Local.json](appsettings.Local.json):
+
+- `AllowSelfAssignedRoles = true`
+  Keeps the public demo flow simple by allowing role selection at registration time.
+- `ExposeMachineDebugHeaders = true`
+  Useful when demonstrating multiple API instances behind nginx.
+- `RequireHttpsForAuthCookie = false`
+  Allows local HTTP development without TLS termination.
+
+Testing behavior:
+
+- The integration test host enables self-assigned roles and relaxes the cookie HTTPS requirement so the test flow can exercise role and permission scenarios over the in-memory test server.
+
+Behind a reverse proxy:
+
+- Set `Security:TrustedProxies` to explicit IP addresses, or `Security:TrustedNetworks` to explicit CIDR ranges, for the proxy layer that is allowed to send `X-Forwarded-*` headers.
+- Do not clear proxy trust lists globally in production.
+- Keep `RequireHttpsForAuthCookie = true` when TLS is terminated at the proxy.
+
 ## Run with Docker Compose
 
 1. Copy `.env.example` to `.env`.
@@ -113,6 +149,8 @@ Add `api.identity.local` to your hosts file:
 Then call the API via `http://api.identity.local`.
 
 ## Recommended demo flow
+
+This flow assumes the `Local` environment, where self-assigned roles are intentionally enabled for demonstration.
 
 1. Register a user with roles `1` and `2`.
 2. Log in with that user.

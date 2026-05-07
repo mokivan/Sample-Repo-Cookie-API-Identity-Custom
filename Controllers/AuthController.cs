@@ -2,6 +2,8 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using TestIdentity.Configuration;
 using TestIdentity.Identity.CustomModel;
 using TestIdentity.Identity.DTO;
 using TestIdentity.Identity.Stores;
@@ -14,15 +16,18 @@ namespace TestIdentity.Controllers
         private readonly SignInManager<AppUser> _signInManager;
         private readonly UserManager<AppUser> _userManager;
         private readonly ICustomSessionStore _sessionStore;
+        private readonly SecurityOptions _securityOptions;
 
         public AuthController(
             SignInManager<AppUser> signInManager,
             UserManager<AppUser> userManager,
-            ICustomSessionStore sessionStore)
+            ICustomSessionStore sessionStore,
+            IOptions<SecurityOptions> securityOptions)
         {
             _signInManager = signInManager;
             _userManager = userManager;
             _sessionStore = sessionStore;
+            _securityOptions = securityOptions.Value;
         }
 
         [HttpPost("login")]
@@ -70,7 +75,10 @@ namespace TestIdentity.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterModel user)
         {
-            var result = await _userManager.CreateAsync(user.AsAppUser(), user.Password);
+            var requestedRoleIds = _securityOptions.AllowSelfAssignedRoles
+                ? user.Roles
+                : [];
+            var result = await _userManager.CreateAsync(user.AsAppUser(requestedRoleIds), user.Password);
             if (result.Succeeded)
             {
                 return Ok();

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
+using TestIdentity.Configuration;
 using TestIdentity.DataAccess;
 using TestIdentity.Identity.CustomModel;
 using TestIdentity.Identity.Filters;
@@ -24,9 +25,16 @@ namespace TestIdentity
 
             builder.Configuration.AddEnvironmentVariables($"{typeof(Program).Namespace}_");
 
+            var securityOptions = builder.Configuration.GetSection(SecurityOptions.SectionName).Get<SecurityOptions>() ?? new SecurityOptions();
+
             builder.Services.AddProblemDetails();
             builder.Services.AddControllers();
             builder.Services.AddSingleton(TimeProvider.System);
+            builder.Services
+                .AddOptions<SecurityOptions>()
+                .Bind(builder.Configuration.GetSection(SecurityOptions.SectionName))
+                .Validate(SecurityOptions.IsValid, "Security configuration contains an invalid trusted proxy or trusted network entry.")
+                .ValidateOnStart();
 
             var redisConnectionString = builder.Configuration.GetRequiredConnectionString("RedisConn");
             var redis = ConnectionMultiplexer.Connect(redisConnectionString);
@@ -60,12 +68,7 @@ namespace TestIdentity
 
             builder.Services.Configure<ForwardedHeadersOptions>(options =>
             {
-                options.ForwardedHeaders =
-                    ForwardedHeaders.XForwardedFor
-                    | ForwardedHeaders.XForwardedHost
-                    | ForwardedHeaders.XForwardedProto;
-                options.KnownIPNetworks.Clear();
-                options.KnownProxies.Clear();
+                SecurityOptions.ApplyForwardingConfiguration(options, securityOptions);
             });
 
             builder.Services.ConfigureApplicationCookie(options =>
@@ -73,7 +76,9 @@ namespace TestIdentity
                 options.Cookie.Name = "sample_identity";
                 options.Cookie.HttpOnly = true;
                 options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+                options.Cookie.SecurePolicy = securityOptions.RequireHttpsForAuthCookie
+                    ? CookieSecurePolicy.Always
+                    : CookieSecurePolicy.SameAsRequest;
                 options.ExpireTimeSpan = TimeSpan.FromHours(8);
                 options.SlidingExpiration = true;
                 options.Events.OnRedirectToLogin = context =>
@@ -105,21 +110,23 @@ namespace TestIdentity
             {
                 exceptionApp.Run(async context =>
                 {
-                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        Message = "An unexpected error occurred."
-                    });
+                    await Results.Problem(
+                        statusCode: StatusCodes.Status500InternalServerError,
+                        title: "An unexpected error occurred.")
+                        .ExecuteAsync(context);
                 });
             });
 
             app.UseForwardedHeaders();
-            app.Use(async (context, next) =>
+            if (securityOptions.ExposeMachineDebugHeaders)
             {
-                context.Response.Headers["X-Machine-Name"] = Environment.MachineName;
-                context.Response.Headers["X-Machine-Ip"] = GetMachineIpAddress();
-                await next();
-            });
+                app.Use(async (context, next) =>
+                {
+                    context.Response.Headers["X-Machine-Name"] = Environment.MachineName;
+                    context.Response.Headers["X-Machine-Ip"] = GetMachineIpAddress();
+                    await next();
+                });
+            }
 
             if (!app.Environment.IsProduction())
             {

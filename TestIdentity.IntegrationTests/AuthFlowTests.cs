@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TestIdentity.Identity.DTO;
 using TestIdentity.Identity.Stores;
@@ -39,6 +40,41 @@ public sealed class AuthFlowTests : IClassFixture<TestApplicationFactory>
 
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_IgnoresRequestedRoles_WhenSelfAssignedRolesAreDisabled()
+    {
+        await using var restrictedFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configBuilder) =>
+            {
+                configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Security:AllowSelfAssignedRoles"] = "false"
+                });
+            });
+        });
+
+        using var client = restrictedFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+            HandleCookies = true
+        });
+
+        var registerRequest = TestUsers.CreateRegisterRequest(roleIds: [1, 2]);
+
+        var registerResponse = await client.PostAsJsonAsync("/register", registerRequest);
+        var loginResponse = await client.PostAsJsonAsync("/login", TestUsers.CreateLoginRequest(registerRequest));
+        var meResponse = await client.GetAsync("/me");
+        var payload = await meResponse.Content.ReadFromJsonAsync<CurrentUserResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, registerResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, meResponse.StatusCode);
+        Assert.NotNull(payload);
+        Assert.Empty(payload.Roles);
+        Assert.Empty(payload.Permissions);
     }
 
     [Fact]
