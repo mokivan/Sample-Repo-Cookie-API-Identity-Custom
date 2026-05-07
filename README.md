@@ -56,6 +56,11 @@ The following pieces are custom on purpose because they help explain how ASP.NET
 - `TestIdentity.IntegrationTests`
   End-to-end tests using `WebApplicationFactory` plus PostgreSQL and Redis containers.
 
+## Reference docs
+
+- [docs/dotnet-knowledge-base.md](docs/dotnet-knowledge-base.md)
+  Practical .NET and C# tips, best practices, and architecture guidance derived from current Microsoft guidance and a curated Medium reference article.
+
 ## Run locally
 
 ### Prerequisites
